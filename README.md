@@ -251,6 +251,85 @@ Our main inspiration is a visualisation of the digital humanities academic commu
 
 **80% of the final grade**
 
+### Live Demo
+
+**[https://thesocialgraph.vercel.app](https://thesocialgraph.vercel.app)**
+
+### Deliverables
+
+| Deliverable | Link |
+|-------------|------|
+| Live demo | [https://thesocialgraph.vercel.app](https://thesocialgraph.vercel.app) |
+| Process book | [process_book.md](process_book.md) |
+| Screencast | [Screencast — Coming Soon](#) |
+
+### What Was Delivered
+
+- Polished interactive D3.js ego-network explorer on the Last.fm UK friendship graph
+- Attribute-driven second-degree connection discovery (country and age-group filters, AND/OR logic)
+- Bridge friend ranking panel with click-to-focus graph interaction
+- Candidate ranking panel with top-N slider and shared-trait detail view
+- Storyline narrative cards (A/B/C annotated scenarios)
+- Atlas section with six exploratory charts grounding the data story
+- Responsive layout, clean visual hierarchy, and accessible color scheme
+- Process book documenting the full design journey from Milestone 1 sketches to final build
+
+---
+
+## Setup / Local Development
+
+The project is a fully static site — no build step, no server-side dependencies.
+
+### Quick start (recommended)
+
+```bash
+cd milestone2/
+python3 -m http.server 8080
+```
+
+Then open [http://localhost:8080](http://localhost:8080) in your browser.
+
+### Alternative: open directly
+
+You can also open `milestone2/index.html` directly in a browser. Some browsers restrict local `fetch()` calls for JSON files, so the `http.server` method above is more reliable.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `milestone2/index.html` | Entry point |
+| `milestone2/app.js` | All D3 / interaction logic |
+| `milestone2/data.js` | Embedded dataset (5 prototype ego cases) |
+| `milestone2/styles.css` | All visual styling |
+
+No npm install, no bundler, no environment variables required.
+
+---
+
+## Data
+
+**Dataset:** Last.fm UK User Graph\
+**Source:** [Zenodo DOI 10.5281/zenodo.10694369](https://doi.org/10.5281/zenodo.10694369)\
+**Published:** February 2024 — University of Pisa / CNR
+
+| File | Size | Contents |
+|------|------|---------|
+| `network` | — | 75,969 users, 389,639 undirected friendship edges |
+| `UsersData_anonymized` | — | Per-user attributes: gender, age, country |
+| `ArtistTags` | 246 MB | Artists mapped to musical tags (excluded from git — too large) |
+| `ArtistsMap` | — | Artist names → IDs |
+
+The embedded `data.js` file contains a preprocessed extract: 5 representative ego users with their direct friends, second-degree candidates, and computed match scores. The full raw files are available via the Zenodo link above.
+
+**Key statistics from the dataset:**
+
+- 75,969 connected users, 389,639 unique undirected friendships
+- Median direct-friend degree: 5
+- Median second-degree reach: 166 — a 33× expansion in one hop
+- Friendship edges represent real mutual social connections (not inferred)
+- All data is fully anonymised
+
+---
 
 ## Late policy
 

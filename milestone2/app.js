@@ -46,7 +46,7 @@ function boot() {
     window.history.scrollRestoration = "manual";
   }
 
-  document.querySelector("#caveat-text").textContent = data.caveats[1];
+  document.querySelector("#caveat-text").textContent = data.caveats?.[1] ?? "";
   renderOverviewStrip();
   renderSummaryChips();
   renderInsights();
@@ -231,6 +231,7 @@ function bindRange() {
 
 function render() {
   const selectedCase = getSelectedCase();
+  if (!selectedCase) return;
   const visibleCandidates = getVisibleCandidates(selectedCase);
   const selectedCandidate = getSelectedCandidate(visibleCandidates);
 
@@ -455,6 +456,7 @@ function renderHeroVisual(selectedCase, visibleCandidates, selectedCandidate) {
   });
 
   const svg = createSvg(width, height);
+  svg.setAttribute("aria-label", "Miniature preview of the two-hop connection graph");
   svg.appendChild(createRing(centerX, centerY, firstRadius));
   svg.appendChild(createRing(centerX, centerY, secondRadius));
   svg.appendChild(createText("1 hop", centerX, centerY - firstRadius - 10, "ring-label", "middle"));
@@ -495,6 +497,61 @@ function renderHeroVisual(selectedCase, visibleCandidates, selectedCandidate) {
   container.replaceChildren(svg);
 }
 
+// ── Graph helpers (module-level) ──────────────────────────────────────────────
+
+function nodeBaseR(d) {
+  return d.group === 0 ? 30 : d.group === 1 ? 13 : 12;
+}
+
+function nodeBaseColor(d) {
+  if (d.group === 0) return palette.root;
+  if (d.group === 1) return palette.first;
+  return d.data && d.data.shared_attribute_count >= 2 ? palette.secondStrong : palette.second;
+}
+
+function initGraphSvg(container, W, H, rootUserId) {
+  if (gfx.svg) return;
+  container.innerHTML = "";
+  gfx.svg = d3.select(container).append("svg")
+    .attr("viewBox", `0 0 ${W} ${H}`)
+    .attr("role", "img")
+    .attr("aria-label", `Interactive two-hop connection graph — User ${rootUserId} at center`);
+  gfx.svg.append("g").attr("class", "g-rings");
+  gfx.svg.append("g").attr("class", "g-links");
+  gfx.svg.append("g").attr("class", "g-nodes");
+  gfx.svg.append("g").attr("class", "g-labels");
+  gfx.svg.append("g").attr("class", "g-legend");
+  renderGraphLegend(gfx.svg.select(".g-legend"), W - 220, 48);
+}
+
+function drawGraphRings(svg, cx, cy, R1, R2) {
+  const ringsG = svg.select(".g-rings");
+  ringsG.selectAll("*").remove();
+  [[R1, "1 hop"], [R2, "2 hops"]].forEach(([r, lbl]) => {
+    ringsG.append("circle")
+      .attr("cx", cx).attr("cy", cy).attr("r", r)
+      .attr("fill", "none").attr("stroke", palette.ring)
+      .attr("stroke-width", 1.4).attr("stroke-dasharray", "7 8");
+    ringsG.append("text")
+      .attr("x", cx).attr("y", cy - r - 10)
+      .attr("text-anchor", "middle").attr("class", "ring-label").text(lbl);
+  });
+}
+
+function buildGraphSimulation(nodes, links, cx, cy, R1, R2) {
+  if (gfx.simulation) gfx.simulation.stop();
+  gfx.simulation = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id((d) => d.id).strength(0.1).distance(60))
+    .force("charge", d3.forceManyBody().strength((d) =>
+      d.group === 0 ? -1200 : d.group === 1 ? -220 : -90
+    ))
+    .force("radial1", d3.forceRadial(R1, cx, cy).strength((d) => d.group === 1 ? 0.9 : 0))
+    .force("radial2", d3.forceRadial(R2, cx, cy).strength((d) => d.group === 2 ? 0.8 : 0))
+    .force("collide", d3.forceCollide((d) => d.group === 0 ? 38 : d.group === 1 ? 24 : 18))
+    .alphaDecay(0.022)
+    .velocityDecay(0.38);
+}
+
 // ─── Main D3 force-directed graph ─────────────────────────────────────────────
 
 function renderGraph(selectedCase, visibleCandidates, selectedCandidate) {
@@ -533,48 +590,10 @@ function renderGraph(selectedCase, visibleCandidates, selectedCandidate) {
     .filter((e) => nodeById.has(e.source) && nodeById.has(e.target))
     .map((e) => ({ source: e.source, target: e.target }));
 
-  // Create SVG once; reset when case changes (triggered by renderCaseSelector)
-  if (!gfx.svg) {
-    container.innerHTML = "";
-    gfx.svg = d3.select(container).append("svg")
-      .attr("viewBox", `0 0 ${W} ${H}`)
-      .attr("role", "img");
-    gfx.svg.append("g").attr("class", "g-rings");
-    gfx.svg.append("g").attr("class", "g-links");
-    gfx.svg.append("g").attr("class", "g-nodes");
-    gfx.svg.append("g").attr("class", "g-labels");
-    gfx.svg.append("g").attr("class", "g-legend");
-    renderGraphLegend(gfx.svg.select(".g-legend"), W - 220, 48);
-  }
-
+  initGraphSvg(container, W, H, rootData.id);
   const svg = gfx.svg;
-
-  // Static ring guides
-  const ringsG = svg.select(".g-rings");
-  ringsG.selectAll("*").remove();
-  [[R1, "1 hop"], [R2, "2 hops"]].forEach(([r, lbl]) => {
-    ringsG.append("circle")
-      .attr("cx", cx).attr("cy", cy).attr("r", r)
-      .attr("fill", "none").attr("stroke", palette.ring)
-      .attr("stroke-width", 1.4).attr("stroke-dasharray", "7 8");
-    ringsG.append("text")
-      .attr("x", cx).attr("y", cy - r - 10)
-      .attr("text-anchor", "middle").attr("class", "ring-label").text(lbl);
-  });
-
-  // Stop previous simulation before creating a new one
-  if (gfx.simulation) gfx.simulation.stop();
-
-  gfx.simulation = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(links).id((d) => d.id).strength(0.1).distance(60))
-    .force("charge", d3.forceManyBody().strength((d) =>
-      d.group === 0 ? -1200 : d.group === 1 ? -220 : -90
-    ))
-    .force("radial1", d3.forceRadial(R1, cx, cy).strength((d) => d.group === 1 ? 0.9 : 0))
-    .force("radial2", d3.forceRadial(R2, cx, cy).strength((d) => d.group === 2 ? 0.8 : 0))
-    .force("collide", d3.forceCollide((d) => d.group === 0 ? 38 : d.group === 1 ? 24 : 18))
-    .alphaDecay(0.022)
-    .velocityDecay(0.38);
+  drawGraphRings(svg, cx, cy, R1, R2);
+  buildGraphSimulation(nodes, links, cx, cy, R1, R2);
 
   // ── Links ──────────────────────────────────────────────────────────────────
 
@@ -639,9 +658,9 @@ function renderGraph(selectedCase, visibleCandidates, selectedCandidate) {
         .attr("class", "root-label node-label")
         .attr("text-anchor", "middle")
         .attr("opacity", 0)
-        .text((d) => `A${d.id}`)
+        .text("you")
         .call((sel) => sel.transition().delay(0).duration(400).attr("opacity", 1)),
-      (update) => update.text((d) => `A${d.id}`),
+      (update) => update.text("you"),
       (exit) => exit.remove()
     );
 
@@ -674,16 +693,6 @@ function renderGraph(selectedCase, visibleCandidates, selectedCandidate) {
   applyHighlight(null);
 
   // ── Helpers inside renderGraph ─────────────────────────────────────────────
-
-  function nodeBaseR(d) {
-    return d.group === 0 ? 30 : d.group === 1 ? 13 : 12;
-  }
-
-  function nodeBaseColor(d) {
-    if (d.group === 0) return palette.root;
-    if (d.group === 1) return palette.first;
-    return d.data && d.data.shared_attribute_count >= 2 ? palette.secondStrong : palette.second;
-  }
 
   function nodeDrag() {
     return d3.drag()
