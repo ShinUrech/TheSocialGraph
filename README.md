@@ -79,7 +79,8 @@ TheSocialGraph/
 ├── specs/
 │   ├── Milestone_2.pdf
 │   └── Milestone_3.pdf
-└── CLAUDE.md
+├── process_book.pdf           ← Milestone 3 process book
+└── screencast.mp4             ← 2-minute demo screencast
 ```
 
 ---
