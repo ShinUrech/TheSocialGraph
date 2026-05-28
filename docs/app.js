@@ -4,6 +4,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 const data = window.MILESTONE_DATA;
+const runtime = buildRuntimeContext(data);
 
 const palette = {
   root:         "#1aa89d",
@@ -32,7 +33,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 let tweaks = { ...TWEAK_DEFAULTS };
 
 const state = {
-  selectedCaseId:    String(data.prototype.cases[0].user.id),
+  selectedCaseId:    runtime.defaultCaseId,
   selectedCandidateId: null,
   focusedBridgeId:   null,
   filterMode:        "any",
@@ -40,6 +41,7 @@ const state = {
   filters: {
     same_country:   false,
     same_age_group: false,
+    same_gender:    false,
   },
 };
 
@@ -53,6 +55,12 @@ const gfx = {
 
 let graphController = null;
 const tooltip = document.getElementById("tooltip");
+const uiText = {
+  rankingNote: "Ranking uses mutual-friend count plus shared-trait count. It orders the pre-ranked shipped pool for the selected ego case.",
+  emptyCandidateFocus: "Hover or click a candidate from the shipped pool to inspect its bridge path and trait overlap.",
+  emptyPath: "The interactive view is a ranked shipped slice of the broader two-hop reach. Hover or click a candidate to inspect why it appears here.",
+  zeroVisible: "The current filter combination removes every shipped candidate. Clear the bridge focus or relax the trait filters to reopen the pool.",
+};
 
 // ─── Boot ──────────────────────────────────────────────────────────────────
 boot();
@@ -75,16 +83,15 @@ function boot() {
     if (savedTweaks) Object.assign(tweaks, JSON.parse(savedTweaks));
   } catch (_) {}
 
-  document.querySelector("#caveat-text").textContent = data.caveats[1] || data.caveats[0] || "";
-
   renderOverviewStrip();
-  renderSummaryChips();
+  renderCurrentEvidence();
   renderInsights();
   renderQualityGrid();
   renderCaseSelector();
   renderFilterMode();
   renderFilters();
   bindRange();
+  bindClearFocus();
   bindNav();
   bindStoryMode();
   bindTweaks();
@@ -107,6 +114,33 @@ function persistState() {
       filters:        state.filters,
     }));
   } catch (_) {}
+}
+
+function buildRuntimeContext(source) {
+  const cases = source.prototype.cases || [];
+  return {
+    defaultCaseId: cases.length ? String(cases[0].user.id) : "",
+    exemplarCount: cases.length,
+    maxShippedPool: cases.reduce((max, item) => Math.max(max, item.candidates?.length || 0), 0),
+    atlas: {
+      caseComparisonRows: cases.map((item) => ({
+        label: `User ${item.user.id}`,
+        caseId: String(item.user.id),
+        direct_friends: item.summary.direct_friends,
+        total_second_degree: item.summary.second_degree_count,
+        interactive_pool: item.summary.visible_second_degree_count ?? item.candidates.length,
+        visible_same_country: item.summary.visible_same_country ?? 0,
+        visible_same_age_group: item.summary.visible_same_age_group ?? 0,
+        visible_same_both: item.summary.visible_same_both ?? 0,
+      })),
+      qualityStats: [
+        [source.quality_checks.missing_age, "users with missing age"],
+        [source.quality_checks.missing_country, "missing country"],
+        [source.quality_checks.missing_gender, "missing gender"],
+        [source.quality_checks.users_with_degree_zero, "isolated users"],
+      ],
+    },
+  };
 }
 
 // ─── Nav ──────────────────────────────────────────────────────────────────
@@ -174,10 +208,10 @@ function animateCounters() {
 function renderSummaryChips() {
   const container = document.querySelector("#summary-chips");
   const chips = [
-    `${percent(data.summaries.friend_country_match_rate_mean)} avg friend-country match`,
-    `${percent(data.summaries.friend_age_group_match_rate_mean)} avg friend-age match`,
-    `${formatCompact(data.summaries.second_degree["90%"])} second-degree reach at P90`,
-    `${formatCompact(data.summaries.shared_both_second_degree["50%"])} median "both traits" overlap`,
+    `${runtime.exemplarCount} shipped ego case${runtime.exemplarCount === 1 ? "" : "s"}`,
+    `${formatCompact(runtime.maxShippedPool)} ranked candidates per case`,
+    `${percent(data.summaries.friend_country_match_rate_mean)} friend-country match`,
+    `${percent(data.summaries.friend_age_group_match_rate_mean)} friend-age match`,
   ];
   container.replaceChildren();
   chips.forEach((text, i) => {
@@ -186,6 +220,14 @@ function renderSummaryChips() {
     chip.textContent = text;
     container.appendChild(chip);
   });
+}
+
+function renderCurrentEvidence() {
+  const note = document.querySelector("#caveat-text");
+  if (note) {
+    note.textContent = `This build ships ${runtime.exemplarCount} curated ego cases and a pre-ranked candidate pool of up to ${runtime.maxShippedPool} users per case. Music taste remains planned because no per-user listening table is available in the repo-visible data.`;
+  }
+  renderSummaryChips();
 }
 
 function renderInsights() {
@@ -205,12 +247,7 @@ function renderInsights() {
 
 function renderQualityGrid() {
   const container = document.querySelector("#quality-grid");
-  const items = [
-    [data.quality_checks.missing_age,          "users with missing age"],
-    [data.quality_checks.missing_country,      "missing country"],
-    [data.quality_checks.missing_gender,       "missing gender"],
-    [data.quality_checks.users_with_degree_zero, "isolated users"],
-  ];
+  const items = runtime.atlas.qualityStats;
   container.replaceChildren();
   items.forEach(([value, label]) => {
     const card = document.createElement("article");
@@ -227,7 +264,7 @@ function renderCaseSelector() {
   data.prototype.cases.forEach((item) => {
     const option = document.createElement("option");
     option.value = String(item.user.id);
-    option.textContent = `User ${item.user.id} · ${item.user.country || "unknown"} · ${item.user.age_group || "unknown"}`;
+    option.textContent = `User ${item.user.id} · ${item.user.country || "unknown"} · ${item.user.age_group || "unknown"} · ${item.user.gender || "unknown"} · degree ${item.user.degree}`;
     select.appendChild(option);
   });
   select.value = state.selectedCaseId;
@@ -269,7 +306,7 @@ function renderFilters() {
       <input type="checkbox" data-filter="${filter.id}">
       <div class="filter-copy">
         <strong>${filter.label}</strong>
-        <p>Filter the two-hop neighborhood by this trait.</p>
+        <p>Filter the shipped candidate pool by this trait.</p>
       </div>`;
     const input = row.querySelector("input");
     input.checked = state.filters[filter.id];
@@ -310,6 +347,16 @@ function bindRange() {
   });
 }
 
+function bindClearFocus() {
+  const button = document.querySelector("#clear-focus-btn");
+  if (!button) return;
+  button.addEventListener("click", () => {
+    state.selectedCandidateId = null;
+    state.focusedBridgeId = null;
+    render();
+  });
+}
+
 // ─── Story mode ────────────────────────────────────────────────────────────
 function bindStoryMode() {
   const overlay   = document.getElementById("story-overlay");
@@ -323,17 +370,18 @@ function bindStoryMode() {
   const dotsEl    = document.getElementById("story-step-dots");
   const visualEl  = document.getElementById("story-visual");
 
-  const steps = buildStorySteps();
+  let steps = [];
   let cur = 0;
 
   function showStep(idx) {
+    if (!steps.length) steps = buildStorySteps();
     cur = Math.max(0, Math.min(idx, steps.length - 1));
     const s = steps[cur];
     titleEl.textContent     = s.title;
-    descEl.textContent      = s.desc;
+    descEl.innerHTML        = s.desc;
     counterEl.textContent   = `${cur + 1} / ${steps.length}`;
     prevBtn.disabled        = cur === 0;
-    nextBtn.textContent     = cur === steps.length - 1 ? "Done ✓" : "Next →";
+    nextBtn.textContent     = cur === steps.length - 1 ? (s.doneLabel || "Done ✓") : (s.nextLabel || "Next →");
     nextBtn.className       = `story-nav-btn primary`;
 
     // Render visual
@@ -351,6 +399,7 @@ function bindStoryMode() {
   }
 
   openBtn.addEventListener("click", () => {
+    steps = buildStorySteps();
     overlay.style.display = "flex";
     showStep(0);
   });
@@ -359,7 +408,14 @@ function bindStoryMode() {
   prevBtn.addEventListener("click", () => showStep(cur - 1));
   nextBtn.addEventListener("click", () => {
     if (cur === steps.length - 1) {
+      const finalStep = steps[cur];
       overlay.style.display = "none";
+      if (finalStep?.doneAction === "finder") {
+        setTimeout(() => {
+          document.getElementById("finder-mode-btn")?.click();
+        }, 120);
+        return;
+      }
       document.getElementById("explorer").scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
       showStep(cur + 1);
@@ -375,65 +431,156 @@ function bindStoryMode() {
 }
 
 function buildStorySteps() {
-  const d  = data;
-  const c0 = d.prototype.cases[0];
+  const d = data;
+  const selectedCase = getSelectedCase() || d.prototype.cases[0];
+  const shippedPool = selectedCase.summary.visible_second_degree_count ?? selectedCase.candidates.length;
+  const liveFilters = data.prototype.supported_filters
+    .map((filter) => filter.label)
+    .join(", ");
 
   return [
     {
       title: "75,969 users · one graph",
-      desc:  `The Last.fm UK friendship graph contains ${formatCompact(d.overview.users)} users and ${formatCompact(d.overview.unique_friendships)} friendships. The median user has ${d.overview.median_degree} direct friends — but ${formatCompact(d.overview.median_second_degree)} people are reachable in just one extra hop.`,
-      visual: (el) => drawStoryMiniGraph(el, "overview"),
+      desc:  `The Last.fm UK friendship graph contains ${formatCompact(d.overview.users)} users and ${formatCompact(d.overview.unique_friendships)} friendships. The median user has ${d.overview.median_degree} direct friends, but ${formatCompact(d.overview.median_second_degree)} people are reachable in one extra hop.`,
+      visual: (el) => drawStoryMiniGraph(el, "overview", selectedCase),
     },
     {
       title: "The ego at the center",
-      desc:  `We call the selected person the "ego". This explorer lets you pick from 5 exemplar ego users, each with a different country, age group, and degree. The ego sits at the center of the force-directed graph.`,
-      visual: (el) => drawStoryMiniGraph(el, "ego"),
+      desc:  `The selected person is the ego. This build ships ${runtime.exemplarCount} curated ego cases; User ${selectedCase.user.id} currently sits at the center and has ${formatCompact(selectedCase.summary.direct_friends)} direct friends in the first ring.`,
+      visual: (el) => drawStoryMiniGraph(el, "ego", selectedCase),
     },
     {
       title: "Bridge friends — the first ring",
-      desc:  `The ego's direct friends form the first ring. We call them "bridge friends" because they bridge the ego toward the wider second-degree neighborhood. User ${c0.user.id} has ${c0.summary.direct_friends} bridge friends.`,
-      visual: (el) => drawStoryMiniGraph(el, "bridges"),
+      desc:  `Direct friends are bridge friends because they open routes into the wider network. Hover them to preview paths, and click one to spotlight only the candidates they connect to.`,
+      visual: (el) => drawStoryMiniGraph(el, "bridges", selectedCase),
     },
     {
       title: "Candidates — the second ring",
-      desc:  `Friends-of-friends who aren't already direct friends are "candidates." User ${c0.user.id} can reach ${formatCompact(c0.summary.second_degree_count)} candidates in two hops. We rank them by score: mutual friends + shared traits (country, age group).`,
-      visual: (el) => drawStoryMiniGraph(el, "candidates"),
+      desc:  `User ${selectedCase.user.id} reaches ${formatCompact(selectedCase.summary.second_degree_count)} second-degree matches in total. This interactive case ships ${formatCompact(shippedPool)} ranked candidates for close inspection, ordered by mutual-friend count plus shared-trait count.`,
+      visual: (el) => drawStoryMiniGraph(el, "candidates", selectedCase),
     },
     {
       title: "Filter & explore",
-      desc:  `Use the filter controls to narrow candidates by shared country or age group. Click a bridge friend to spotlight which candidates they open. Click a candidate to lock it in the detail panel. Drag nodes to rearrange. Now try it!`,
-      visual: (el) => drawStoryMiniGraph(el, "full"),
+      desc:  `Use the live filters for ${liveFilters.toLowerCase()}. Switch between ANY and ALL logic, click a candidate to lock the detail panel, and use Clear focus to reset the path without changing the case.`,
+      visual: (el) => drawStoryMiniGraph(el, "full", selectedCase),
+    },
+    {
+      title: "Find a Match — choose your persona",
+      desc:  `The search flow starts with a persona chooser. Pick one of the curated users, then continue with Search connections to open the guided wizard.`,
+      visual: (el) => renderStoryFinderPersonaGuide(el),
+    },
+    {
+      title: "Find a Match — filter, inspect, return",
+      desc:  `In the wizard, keep country fixed to the case, narrow matches with age group, gender, and mutual-friend filters, click a result to reveal the introduction path, then use Explore in graph to send that match back into the full explorer.`,
+      visual: (el) => renderStoryFinderPathGuide(el, selectedCase),
+      doneLabel: "Open Find a Match →",
+      doneAction: "finder",
     },
   ];
 }
 
-function drawStoryMiniGraph(container, mode) {
+function renderStoryFinderPersonaGuide(container) {
+  const guide = document.createElement("div");
+  guide.className = "story-finder-guide";
+  const cards = data.prototype.cases.map((item) => `
+    <article class="story-persona-card${String(item.user.id) === String(state.selectedCaseId) ? " active" : ""}">
+      <strong>User ${item.user.id}</strong>
+      <p>${item.user.age_group || "unknown"} · ${item.user.gender || "unknown"} · ${item.user.country || "unknown"}</p>
+      <div class="story-persona-chip-row">
+        <span>${formatCompact(item.summary.direct_friends)} friends</span>
+        <span>${formatCompact(item.summary.second_degree_count)} reachable</span>
+      </div>
+    </article>
+  `).join("");
+  guide.innerHTML = `
+    <div class="story-persona-strip">${cards}</div>
+    <div class="story-finder-cta-row">
+      <p>Pick a user — explore their second-degree world.</p>
+      <span class="story-finder-cta">Search connections →</span>
+    </div>`;
+  container.replaceChildren(guide);
+}
+
+function renderStoryFinderPathGuide(container, selectedCase) {
+  const guide = document.createElement("div");
+  guide.className = "story-finder-guide";
+
+  const sampleCandidate =
+    selectedCase.candidates.find((candidate) => candidate.mutual_friend_ids.length >= 2 && candidate.same_age_group && candidate.same_gender)
+    || selectedCase.candidates.find((candidate) => candidate.mutual_friend_ids.length >= 2)
+    || selectedCase.candidates[0];
+
+  const bridgeNodes = selectedCase.direct_friends
+    .filter((friend) => sampleCandidate?.mutual_friend_ids.includes(friend.id))
+    .slice(0, 2);
+
+  const svgWrap = document.createElement("div");
+  svgWrap.className = "story-finder-path-wrap";
+  if (sampleCandidate) {
+    const W = 520, H = 140;
+    const svg = createSvg(W, H);
+    const ego = { x: 82, y: 74 };
+    const target = { x: 438, y: 74 };
+    const bridgePositions = bridgeNodes.length > 1
+      ? [{ x: 250, y: 46 }, { x: 250, y: 102 }]
+      : [{ x: 250, y: 74 }];
+
+    bridgePositions.forEach((pos, index) => {
+      svg.appendChild(createLine(ego.x, ego.y, pos.x, pos.y, palette.first, 2.1, 0.75));
+      svg.appendChild(createLine(pos.x, pos.y, target.x, target.y, palette.second, 2.1, 0.75));
+      svg.appendChild(createCircle(pos.x, pos.y, 10, palette.first));
+      const bridge = bridgeNodes[index];
+      if (bridge) svg.appendChild(createText(`User ${bridge.id}`, pos.x, pos.y - 18, "annotation", "middle"));
+    });
+
+    svg.appendChild(createCircle(ego.x, ego.y, 17, palette.root));
+    svg.appendChild(createCircle(target.x, target.y, 15, palette.second));
+    svg.appendChild(createText(`User ${selectedCase.user.id}`, ego.x, ego.y + 28, "annotation", "middle"));
+    svg.appendChild(createText(`User ${sampleCandidate.id}`, target.x, target.y + 28, "annotation", "middle"));
+    svgWrap.appendChild(svg);
+  }
+
+  const chips = [
+    `Country: ${selectedCase.user.country || "UK"}`,
+    `Age: ${sampleCandidate?.age_group || "Any"}`,
+    `Gender: ${sampleCandidate?.gender || "Any"}`,
+    `${sampleCandidate?.mutual_friends || sampleCandidate?.mutual_friend_ids.length || 0} mutual friend${(sampleCandidate?.mutual_friends || sampleCandidate?.mutual_friend_ids.length || 0) === 1 ? "" : "s"}`
+  ].map((label) => `<span>${label}</span>`).join("");
+
+  guide.innerHTML = `
+    <div class="story-search-chip-row">${chips}</div>
+  `;
+  guide.appendChild(svgWrap);
+  const note = document.createElement("p");
+  note.className = "story-finder-note";
+  note.textContent = "Click a result node to open the introduction path, review the mutual-friend routes, then use Explore in graph to continue in the main explorer.";
+  guide.appendChild(note);
+  container.replaceChildren(guide);
+}
+
+function drawStoryMiniGraph(container, mode, selectedCase = getSelectedCase()) {
   const W = 560, H = 200;
   const cx = W / 2, cy = H / 2;
   const R1 = 58, R2 = 110;
   const svg = createSvg(W, H);
 
-  const c0 = data.prototype.cases[0];
-  const bridges  = c0.direct_friends.slice(0, 6);
-  const cands    = c0.candidates.slice(0, 8);
+  const bridges  = selectedCase.direct_friends.slice(0, 6);
+  const cands    = selectedCase.candidates.slice(0, 8);
 
-  const showBridges   = ["bridges","candidates","full"].includes(mode);
-  const showCandidates = ["candidates","full"].includes(mode);
-  const showRings      = ["bridges","candidates","full"].includes(mode);
+  const showBridges = ["bridges", "candidates", "full"].includes(mode);
+  const showCandidates = ["candidates", "full"].includes(mode);
+  const showRings = ["bridges", "candidates", "full"].includes(mode);
 
-  // rings
   if (showRings) {
     svg.appendChild(createRing(cx, cy, R1));
     svg.appendChild(createRing(cx, cy, R2));
   }
 
-  // candidate nodes
   if (showCandidates) {
     cands.forEach((node, i) => {
       const angle = (Math.PI * 2 * i) / cands.length - Math.PI / 2;
       const x = cx + Math.cos(angle) * R2;
       const y = cy + Math.sin(angle) * R2;
-      // link to bridge
       const bridgeIdx = bridges.findIndex(b => node.mutual_friend_ids.includes(b.id));
       if (bridgeIdx >= 0) {
         const bAngle = (Math.PI * 2 * bridgeIdx) / bridges.length - Math.PI / 2;
@@ -447,7 +594,6 @@ function drawStoryMiniGraph(container, mode) {
     });
   }
 
-  // bridge nodes
   if (showBridges) {
     bridges.forEach((node, i) => {
       const angle = (Math.PI * 2 * i) / bridges.length - Math.PI / 2;
@@ -458,16 +604,16 @@ function drawStoryMiniGraph(container, mode) {
     });
   }
 
-  // ego
   svg.appendChild(createCircle(cx, cy, mode === "ego" ? 24 : 18, palette.root));
   if (mode === "overview") {
-    svg.appendChild(createText("75,969 users", cx, cy - 30, "annotation", "middle"));
-    svg.appendChild(createText("389,639 friendships", cx, cy + 44, "annotation", "middle"));
+    svg.appendChild(createText(formatFullCount(data.overview.users) + " users", cx, cy - 30, "annotation", "middle"));
+    svg.appendChild(createText(formatFullCount(data.overview.unique_friendships) + " friendships", cx, cy + 44, "annotation", "middle"));
   }
   if (mode === "ego") {
     svg.appendChild(createText("ego", cx, cy + 38, "node-label", "middle"));
   }
 
+  container.replaceChildren();
   container.appendChild(svg);
 }
 
@@ -670,6 +816,7 @@ function render() {
   renderHeroVisual(selectedCase, visibleCandidates, selectedCandidate);
   renderStageMetrics(selectedCase, visibleCandidates, selectedCandidate);
   renderStoryline(selectedCase, visibleCandidates, selectedCandidate);
+  renderControlNote(selectedCase, visibleCandidates, selectedCandidate);
   renderGraph(selectedCase, visibleCandidates, selectedCandidate);
   renderEgoCard(selectedCase);
   renderBridgeList(selectedCase, selectedCandidate);
@@ -705,8 +852,8 @@ function getSelectedCandidate(visibleCandidates) {
   if (!visibleCandidates.length) { state.selectedCandidateId = null; return null; }
   const selected = visibleCandidates.find((c) => String(c.id) === String(state.selectedCandidateId));
   if (selected) return selected;
-  state.selectedCandidateId = String(visibleCandidates[0].id);
-  return visibleCandidates[0];
+  if (state.selectedCandidateId) state.selectedCandidateId = null;
+  return null;
 }
 
 // ─── Ego card ──────────────────────────────────────────────────────────────
@@ -717,11 +864,14 @@ function renderEgoCard(selectedCase) {
   card.className = "ego-card-block";
   card.innerHTML = `
     <strong>User ${selectedCase.user.id}</strong>
-    <p>${selectedCase.user.country || "unknown"} · ${selectedCase.user.age_group || "unknown"} · degree ${selectedCase.user.degree}</p>
+    <p>${selectedCase.user.country || "unknown"} · ${selectedCase.user.age_group || "unknown"} · ${selectedCase.user.gender || "unknown"} · degree ${selectedCase.user.degree}</p>
     <div class="ego-meta">
       <span class="chip">direct ${selectedCase.summary.direct_friends}</span>
-      <span class="chip blue">second ${formatCompact(selectedCase.summary.second_degree_count)}</span>
-      <span class="chip alt">both traits ${selectedCase.summary.same_both_second_degree}</span>
+      <span class="chip blue">total 2° ${formatCompact(selectedCase.summary.second_degree_count)}</span>
+      <span class="chip alt">shipped pool ${formatCompact(selectedCase.summary.visible_second_degree_count ?? selectedCase.candidates.length)}</span>
+      <span class="chip">same country ${formatCompact(selectedCase.summary.visible_same_country ?? 0)}</span>
+      <span class="chip blue">same age ${formatCompact(selectedCase.summary.visible_same_age_group ?? 0)}</span>
+      <span class="chip alt">both ${formatCompact(selectedCase.summary.visible_same_both ?? 0)}</span>
     </div>`;
   container.appendChild(card);
 }
@@ -746,7 +896,7 @@ function renderBridgeList(selectedCase, selectedCandidate) {
         <p>${friend.country || "unknown"} · ${friend.age_group || "unknown"} · degree ${friend.degree}</p>
         <div class="bridge-meta">
           <span class="chip">${friend.bridge_count} visible bridges</span>
-          ${focusedBridgeId === friend.id ? '<span class="chip alt">active focus</span>' : ""}
+          ${focusedBridgeId === friend.id ? '<span class="chip alt">bridge focus</span>' : ""}
         </div>
       </button>`;
     const btn = item.querySelector("button");
@@ -765,22 +915,11 @@ function renderBridgeList(selectedCase, selectedCandidate) {
 function renderStageMetrics(selectedCase, visibleCandidates, selectedCandidate) {
   const container = document.querySelector("#stage-metrics");
   container.replaceChildren();
-  const activeFilters = Object.entries(state.filters)
-    .filter(([, v]) => v)
-    .map(([id]) => labelFromFilterId(id));
-
   const metrics = [
-    { label: "direct friends",   value: formatCompact(selectedCase.summary.direct_friends) },
-    { label: "two-hop pool",     value: formatCompact(selectedCase.summary.second_degree_count) },
-    { label: "visible now",      value: formatCompact(visibleCandidates.length) },
-    {
-      label: "active focus",
-      value: state.focusedBridgeId
-        ? `bridge ${state.focusedBridgeId}`
-        : activeFilters.length
-          ? `${state.filterMode === "all" ? "all" : "any"}: ${activeFilters.join(" + ")}`
-          : "open pool",
-    },
+    { label: "direct friends", value: formatCompact(selectedCase.summary.direct_friends) },
+    { label: "total 2° reach", value: formatCompact(selectedCase.summary.second_degree_count) },
+    { label: "shipped pool", value: formatCompact(selectedCase.summary.visible_second_degree_count ?? selectedCase.candidates.length) },
+    { label: "visible after filters", value: formatCompact(visibleCandidates.length) },
   ];
   metrics.forEach((m) => {
     const card = document.createElement("article");
@@ -795,6 +934,20 @@ function renderStageMetrics(selectedCase, visibleCandidates, selectedCandidate) 
     bridgeId: state.focusedBridgeId ? Number(state.focusedBridgeId) : null,
     candidateIds: new Set(selectedCandidate ? [selectedCandidate.id] : []),
   });
+}
+
+function renderControlNote(selectedCase, visibleCandidates, selectedCandidate) {
+  const note = document.querySelector("#ranking-note");
+  const button = document.querySelector("#clear-focus-btn");
+  if (note) {
+    note.innerHTML = `
+      <strong>Ranking note</strong>
+      <p>${uiText.rankingNote}</p>
+      <p>This case ships ${formatCompact(selectedCase.summary.visible_second_degree_count ?? selectedCase.candidates.length)} ranked candidates out of ${formatCompact(selectedCase.summary.second_degree_count)} total second-degree matches.</p>`;
+  }
+  if (button) {
+    button.disabled = !state.focusedBridgeId && !selectedCandidate;
+  }
 }
 
 // ─── Storyline ─────────────────────────────────────────────────────────────
@@ -816,14 +969,14 @@ function renderStoryline(selectedCase, visibleCandidates, selectedCandidate) {
     {
       step: "B",
       title: topBridge ? `Bridge via User ${topBridge.id}` : "Bridge ring",
-      text: `${formatCompact(selectedCase.summary.second_degree_count)} people reachable in two hops.`,
+      text: `${formatCompact(selectedCase.summary.second_degree_count)} people are reachable in two hops, but only ${formatCompact(selectedCase.summary.visible_second_degree_count ?? selectedCase.candidates.length)} ranked candidates are shipped in this interactive case.`,
     },
     {
       step: "C",
       title: selectedCandidate ? `Candidate ${selectedCandidate.id}` : "Ranked candidates",
       text: activeFilters.length
-        ? `${state.filterMode === "all" ? "All" : "Any"} of: ${activeFilters.join(", ")}. ${formatCompact(visibleCandidates.length)} visible.`
-        : `${formatCompact(visibleCandidates.length)} candidates by bridge strength + shared traits.`,
+        ? `${state.filterMode === "all" ? "All" : "Any"} of: ${activeFilters.join(", ")}. ${formatCompact(visibleCandidates.length)} visible in the shipped pool.`
+        : `${formatCompact(visibleCandidates.length)} candidates are visible from the shipped pool; same-country filtering is weak here because almost every case stays in the UK.`,
     },
   ];
   cards.forEach((item) => {
@@ -1124,7 +1277,7 @@ function renderGraph(selectedCase, visibleCandidates, selectedCandidate) {
     tooltip.classList.remove("visible");
     if (d.group === 0) { state.focusedBridgeId = null; render(); }
     else if (d.group === 1) { state.focusedBridgeId = focusedBridgeId === d.id ? null : String(d.id); state.selectedCandidateId = null; render(); }
-    else { state.selectedCandidateId = String(d.id); render(); }
+    else { state.selectedCandidateId = selectedCandidate?.id === d.id ? null : String(d.id); render(); }
   }
 
   function applyHighlight(hover) {
@@ -1244,12 +1397,13 @@ function renderPathExplainer(selectedCase, selectedCandidate, visibleCandidates,
   const card = document.createElement("article");
   card.className = "path-card";
   if (!selectedCandidate) {
-    card.innerHTML = `<strong>No candidate selected</strong><p>Relax the filters or raise the candidate cap to bring more of the second-degree layer into view.</p>`;
+    card.innerHTML = `<strong>No candidate selected</strong><p>${visibleCandidates.length ? uiText.emptyPath : uiText.zeroVisible}</p>`;
     container.appendChild(card); return;
   }
   const reasons = [];
   if (selectedCandidate.same_country)   reasons.push("same country");
   if (selectedCandidate.same_age_group) reasons.push("same age group");
+  if (selectedCandidate.same_gender)    reasons.push("same gender");
   if (!reasons.length) reasons.push("structural reach through mutual friends only");
   card.innerHTML = `
     <strong>${isPreview ? "Previewed path" : "Path explanation"}</strong>
@@ -1257,7 +1411,8 @@ function renderPathExplainer(selectedCase, selectedCandidate, visibleCandidates,
     ${selectedCandidate.mutual_friends} mutual friend${selectedCandidate.mutual_friends === 1 ? "" : "s"}.
     This candidate is interesting because of ${reasons.join(" and ")}.</p>
     <div class="detail-meta">
-      <span class="chip blue">${formatCompact(visibleCandidates.length)} visible</span>
+      <span class="chip blue">${formatCompact(visibleCandidates.length)} visible now</span>
+      <span class="chip">${formatCompact(selectedCase.summary.visible_second_degree_count ?? selectedCase.candidates.length)} shipped pool</span>
       <span class="chip">${formatCompact(selectedCase.summary.second_degree_count)} total 2°</span>
       ${bridgeId ? `<span class="chip alt">via bridge ${bridgeId}</span>` : ""}
     </div>`;
@@ -1270,7 +1425,7 @@ function renderCandidateDetail(selectedCase, selectedCandidate, isPreview = fals
   if (!selectedCandidate) {
     const empty = document.createElement("article");
     empty.className = "detail-card";
-    empty.innerHTML = `<strong>No candidate in focus</strong><p>Adjust filters or choose another case to inspect a reachable second-degree match.</p>`;
+    empty.innerHTML = `<strong>No candidate in focus</strong><p>${uiText.emptyCandidateFocus}</p>`;
     container.appendChild(empty); return;
   }
   const bridgeFriends = selectedCandidate.mutual_friend_ids
@@ -1280,11 +1435,12 @@ function renderCandidateDetail(selectedCase, selectedCandidate, isPreview = fals
   card.className = "detail-card";
   card.innerHTML = `
     <strong>User ${selectedCandidate.id}</strong>
-    <p>${selectedCandidate.country || "unknown"} · ${selectedCandidate.age_group || "unknown"} · degree ${selectedCandidate.degree}</p>
+    <p>${selectedCandidate.country || "unknown"} · ${selectedCandidate.age_group || "unknown"} · ${selectedCandidate.gender || "unknown"} · degree ${selectedCandidate.degree}</p>
     <div class="detail-meta">
       <span class="chip blue">${isPreview ? "hover preview" : "locked spotlight"}</span>
       ${selectedCandidate.same_country    ? '<span class="chip">same country</span>'    : ""}
       ${selectedCandidate.same_age_group  ? '<span class="chip alt">same age group</span>' : ""}
+      ${selectedCandidate.same_gender     ? '<span class="chip blue">same gender</span>' : ""}
       <span class="chip blue">${selectedCandidate.mutual_friends} mutual friend${selectedCandidate.mutual_friends === 1 ? "" : "s"}</span>
       <span class="chip alt">score ${selectedCandidate.score}</span>
     </div>`;
@@ -1311,7 +1467,7 @@ function renderCandidateList(visibleCandidates, selectedCandidate) {
   if (!visibleCandidates.length) {
     const empty = document.createElement("article");
     empty.className = "candidate-row";
-    empty.innerHTML = `<strong>No visible candidates</strong><p>The current filter combination removes all second-degree matches. Try unchecking filters or switch to "Match any".</p>`;
+    empty.innerHTML = `<strong>No visible candidates</strong><p>${uiText.zeroVisible}</p>`;
     container.appendChild(empty); return;
   }
   const maxScore = Math.max(...visibleCandidates.map((c) => c.score), 1);
@@ -1326,6 +1482,7 @@ function renderCandidateList(visibleCandidates, selectedCandidate) {
         <div class="candidate-meta">
           ${candidate.same_country   ? '<span class="chip">same country</span>'    : ""}
           ${candidate.same_age_group ? '<span class="chip alt">same age group</span>' : ""}
+          ${candidate.same_gender    ? '<span class="chip blue">same gender</span>' : ""}
           <span class="chip blue">${candidate.shared_attribute_count} shared trait(s)</span>
         </div>
         <div class="score-rail"><div class="score-fill" style="width:${(candidate.score / maxScore) * 100}%"></div></div>
@@ -1333,7 +1490,10 @@ function renderCandidateList(visibleCandidates, selectedCandidate) {
     const btn = row.querySelector("button");
     btn.addEventListener("mouseenter", () => graphController?.previewCandidate(candidate.id));
     btn.addEventListener("mouseleave", () => graphController?.clear());
-    btn.addEventListener("click", () => { state.selectedCandidateId = String(candidate.id); render(); });
+    btn.addEventListener("click", () => {
+      state.selectedCandidateId = selectedCandidate?.id === candidate.id ? null : String(candidate.id);
+      render();
+    });
     container.appendChild(row);
   });
 }
@@ -1345,18 +1505,18 @@ function renderAtlas(selectedCase, visibleCandidates, selectedCandidate) {
     candidate: selectedCandidate,
     bridgeId: state.focusedBridgeId ? Number(state.focusedBridgeId) : null,
   });
-  renderGroupedCaseChart("#chart-cases", data.charts.prototype_case_sizes, selectedCase.user.id);
+  renderGroupedCaseChart("#chart-cases", runtime.atlas.caseComparisonRows, selectedCase.user.id);
   renderD3Bars("#chart-degree",    data.charts.degree_histogram,            palette.first);
   renderD3Bars("#chart-second",    data.charts.second_degree_histogram,     palette.second);
   renderD3Bars("#chart-shared",    data.charts.shared_attribute_histogram,  palette.amber);
   renderD3Bars("#chart-age",       data.charts.age_group_distribution,      palette.root);
-  renderD3Bars("#chart-countries", data.charts.top_countries,               palette.violet);
+  renderAtlasScopeNote();
 }
 
 function renderAtlasFocus(selectedCase, visibleCandidates, selectedCandidate, context = { mode: "none", bridgeId: null }) {
   const container = document.querySelector("#atlas-focus");
   if (!container) return;
-  const label = context.mode === "candidate" ? "Hover Preview" : context.mode === "bridge" ? "Bridge Focus" : "Live Case";
+  const label = context.mode === "candidate" ? "Hover Preview" : context.mode === "bridge" ? "Bridge Focus" : "Curated Case";
   const card = document.createElement("article");
   card.className = "atlas-focus-card";
   card.innerHTML = `
@@ -1365,10 +1525,20 @@ function renderAtlasFocus(selectedCase, visibleCandidates, selectedCandidate, co
     <p>${selectedCase.user.country || "unknown"} · ${selectedCase.user.age_group || "unknown"} · ${formatCompact(selectedCase.summary.second_degree_count)} total 2°</p>
     <div class="detail-meta">
       <span class="chip blue">${formatCompact(visibleCandidates.length)} visible now</span>
-      ${context.bridgeId ? `<span class="chip alt">bridge ${context.bridgeId}</span>` : '<span class="chip">full neighborhood</span>'}
+      <span class="chip">${formatCompact(selectedCase.summary.visible_second_degree_count ?? selectedCase.candidates.length)} shipped pool</span>
+      ${context.bridgeId ? `<span class="chip alt">bridge ${context.bridgeId}</span>` : '<span class="chip">curated ranked slice</span>'}
       ${selectedCandidate ? `<span class="chip alt">${selectedCandidate.mutual_friends} mutual friends</span>` : ""}
     </div>`;
   container.replaceChildren(card);
+}
+
+function renderAtlasScopeNote() {
+  const container = document.querySelector("#atlas-scope-note");
+  if (!container) return;
+  container.innerHTML = `
+    <strong>Country is a weak filter here</strong>
+    <p>${percent(data.summaries.friend_country_match_rate_mean)} of direct-friend links already match on country, so the country filter barely reduces the shipped cases.</p>
+    <p>The stronger signals in this build are age group and gender, while music taste remains visible only as a planned extension.</p>`;
 }
 
 function syncInteractionPanels(selectedCase, visibleCandidates, selectedCandidate, context) {
@@ -1399,11 +1569,13 @@ function updateStageTitle(selectedCase, selectedCandidate, context) {
     el.textContent = `Previewing User ${selectedCase.user.id} → User ${context.candidate.id} through ${context.candidate.mutual_friends} mutual friend${context.candidate.mutual_friends === 1 ? "" : "s"}`;
   } else if (context.mode === "bridge" && context.bridgeId) {
     const count = context.candidateIds?.size ?? 0;
-    el.textContent = `Bridge User ${context.bridgeId} opens ${count} visible candidate${count === 1 ? "" : "s"}`;
+    el.textContent = `Bridge User ${context.bridgeId} opens ${count} visible shipped candidate${count === 1 ? "" : "s"}`;
   } else if (selectedCandidate) {
     el.textContent = `User ${selectedCase.user.id} reaches User ${selectedCandidate.id} through ${selectedCandidate.mutual_friends} mutual friend${selectedCandidate.mutual_friends === 1 ? "" : "s"}`;
+  } else if (!context.candidateIds?.size && (state.focusedBridgeId || Object.values(state.filters).some(Boolean))) {
+    el.textContent = "No shipped candidates remain visible for the current bridge focus and filter combination";
   } else {
-    el.textContent = "No visible second-degree candidates for the current filter combination";
+    el.textContent = `User ${selectedCase.user.id} has ${formatCompact(selectedCase.summary.second_degree_count)} total second-degree matches, with ${formatCompact(selectedCase.summary.visible_second_degree_count ?? selectedCase.candidates.length)} ranked candidates shipped in this case`;
   }
 }
 
@@ -1419,7 +1591,7 @@ function describeGraphHint(ctx) {
     return `Bridge User ${ctx.bridgeId} opens ${ctx.candidateIds?.size ?? 0} visible candidate(s) — click to focus`;
   if (ctx.mode === "selected" && ctx.candidate)
     return `User ${ctx.candidate.id} selected — click again to clear`;
-  return "← Hover nodes to preview connections · Click to focus · Drag to rearrange";
+  return "← Hover nodes to preview connections · Click to focus · Drag to reposition";
 }
 
 // ─── D3 animated bar charts ────────────────────────────────────────────────
@@ -1477,72 +1649,143 @@ function renderD3Bars(selector, items, color) {
 function renderGroupedCaseChart(selector, items, activeUserId) {
   const container = document.querySelector(selector);
   if (!container || !items?.length) return;
-  const W = 1120, H = 340;
-  const m = { top: 28, right: 18, bottom: 56, left: 50 };
+  const W = 1120, H = 430;
+  const m = { top: 46, right: 24, bottom: 56, left: 50 };
   const iW = W - m.left - m.right, iH = H - m.top - m.bottom;
+  const sectionGap = 54;
+  const sectionHeight = (iH - sectionGap) / 2;
 
-  const groups  = ["direct_friends","second_degree_count","same_country_second_degree","same_age_group_second_degree","same_both_second_degree"];
-  const colors  = [palette.first, palette.second, palette.root, palette.amber, palette.bridge];
-  const legends = ["direct","second","same country","same age","both"];
+  const sections = [
+    {
+      key: "reach",
+      title: "Reach totals",
+      groups: ["direct_friends", "total_second_degree"],
+      colors: [palette.first, palette.second],
+      legends: ["direct", "total 2°"],
+    },
+    {
+      key: "pool",
+      title: "Shipped pool and visible overlaps",
+      groups: ["interactive_pool", "visible_same_country", "visible_same_age_group", "visible_same_both"],
+      colors: [palette.violet, palette.root, palette.amber, palette.bridge],
+      legends: ["shipped", "same country", "same age", "both"],
+    }
+  ];
 
   const xOuter = d3.scaleBand().domain(items.map((d) => String(d.label))).range([0, iW]).padding(0.2);
-  const xInner = d3.scaleBand().domain(groups).range([0, xOuter.bandwidth()]).padding(0.1);
-  const maxVal = d3.max(items.flatMap((item) => groups.map((g) => item[g])));
-  const y = d3.scaleLinear().domain([0, maxVal * 1.1]).nice().range([iH, 0]);
-
   const svgSel = d3.select(container).selectAll("svg").data([null]).join("svg").attr("viewBox", `0 0 ${W} ${H}`);
   const g = svgSel.selectAll("g.case-inner").data([null]).join("g").attr("class", "case-inner").attr("transform", `translate(${m.left},${m.top})`);
 
-  g.selectAll(".d3-grid").data(y.ticks(4)).join("line")
-    .attr("class", "d3-grid").attr("x1", 0).attr("x2", iW).attr("y1", (d) => y(d)).attr("y2", (d) => y(d))
-    .attr("stroke", palette.grid);
+  sections.forEach((section, sectionIndex) => {
+    const yOffset = sectionIndex * (sectionHeight + sectionGap);
+    const xInner = d3.scaleBand().domain(section.groups).range([0, xOuter.bandwidth()]).padding(0.12);
+    const maxVal = d3.max(items.flatMap((item) => section.groups.map((group) => item[group])));
+    const y = d3.scaleLinear().domain([0, maxVal * 1.1]).nice().range([sectionHeight, 0]);
 
-  g.selectAll(".active-bg").data(items.filter((d) => String(d.label).includes(String(activeUserId))))
-    .join("rect").attr("class", "active-bg")
-    .attr("x", (d) => xOuter(String(d.label)) - 4).attr("y", 0)
-    .attr("width", xOuter.bandwidth() + 8).attr("height", iH + 10).attr("rx", 14)
-    .attr("fill", "rgba(26,168,157,0.07)");
+    const sectionG = g.selectAll(`.case-section-${section.key}`).data([section]).join("g")
+      .attr("class", `case-section case-section-${section.key}`)
+      .attr("transform", `translate(0,${yOffset})`);
 
-  const caseGs = g.selectAll(".case-group").data(items, (d) => d.label)
-    .join("g").attr("class", "case-group")
-    .attr("transform", (d) => `translate(${xOuter(String(d.label))},0)`)
-    .attr("opacity", (d) => String(d.label).includes(String(activeUserId)) ? 1 : 0.58);
+    sectionG.selectAll(".section-title").data([section]).join("text")
+      .attr("class", "annotation section-title")
+      .attr("x", 0)
+      .attr("y", -18)
+      .attr("fill", "rgba(220,228,255,0.82)")
+      .text((d) => d.title);
 
-  groups.forEach((key, ki) => {
-    caseGs.selectAll(`.bar-${ki}`).data((d) => [d], (d) => d.label)
-      .join(
-        (enter) => enter.append("rect").attr("class", `bar-${ki}`)
-          .attr("x", xInner(key)).attr("width", xInner.bandwidth())
-          .attr("y", iH).attr("height", 0).attr("rx", 5).attr("fill", colors[ki]).attr("opacity", 0.9)
-          .call((sel) => sel.transition().duration(680).delay(ki * 70 + 180)
-            .attr("y", (d) => y(d[key])).attr("height", (d) => Math.max(iH - y(d[key]), 0))
-          ),
-        (update) => update.transition().duration(500)
-          .attr("y", (d) => y(d[key])).attr("height", (d) => Math.max(iH - y(d[key]), 0)).attr("fill", colors[ki]),
-        (exit) => exit.transition().duration(260).attr("height", 0).attr("y", iH).remove()
-      );
+    sectionG.selectAll(".d3-grid").data(y.ticks(4)).join("line")
+      .attr("class", "d3-grid")
+      .attr("x1", 0)
+      .attr("x2", iW)
+      .attr("y1", (d) => y(d))
+      .attr("y2", (d) => y(d))
+      .attr("stroke", palette.grid);
+
+    sectionG.selectAll(".active-bg").data(items.filter((d) => String(d.caseId) === String(activeUserId)))
+      .join("rect")
+      .attr("class", "active-bg")
+      .attr("x", (d) => xOuter(String(d.label)) - 4)
+      .attr("y", -8)
+      .attr("width", xOuter.bandwidth() + 8)
+      .attr("height", sectionHeight + 16)
+      .attr("rx", 14)
+      .attr("fill", "rgba(26,168,157,0.07)");
+
+    const caseGs = sectionG.selectAll(`.case-group-${section.key}`).data(items, (d) => d.label)
+      .join("g")
+      .attr("class", `case-group case-group-${section.key}`)
+      .attr("transform", (d) => `translate(${xOuter(String(d.label))},0)`)
+      .attr("opacity", (d) => String(d.caseId) === String(activeUserId) ? 1 : 0.58);
+
+    section.groups.forEach((key, ki) => {
+      caseGs.selectAll(`.bar-${section.key}-${ki}`).data((d) => [d], (d) => d.label)
+        .join(
+          (enter) => enter.append("rect")
+            .attr("class", `bar-${section.key}-${ki}`)
+            .attr("x", xInner(key))
+            .attr("width", xInner.bandwidth())
+            .attr("y", sectionHeight)
+            .attr("height", 0)
+            .attr("rx", 5)
+            .attr("fill", section.colors[ki])
+            .attr("opacity", 0.9)
+            .call((sel) => sel.transition().duration(680).delay(ki * 70 + 180)
+              .attr("y", (d) => y(d[key]))
+              .attr("height", (d) => Math.max(sectionHeight - y(d[key]), 0))
+            ),
+          (update) => update.transition().duration(500)
+            .attr("x", xInner(key))
+            .attr("width", xInner.bandwidth())
+            .attr("y", (d) => y(d[key]))
+            .attr("height", (d) => Math.max(sectionHeight - y(d[key]), 0))
+            .attr("fill", section.colors[ki]),
+          (exit) => exit.transition().duration(260).attr("height", 0).attr("y", sectionHeight).remove()
+        );
+    });
+
+    renderLegendRow(sectionG, section.legends, section.colors, iW, -22, section.key);
   });
 
   g.selectAll(".case-label").data(items, (d) => d.label)
     .join("text").attr("class", "case-label axis-label")
     .attr("x", (d) => xOuter(String(d.label)) + xOuter.bandwidth() / 2)
     .attr("y", iH + 20).attr("text-anchor", "middle")
-    .attr("opacity", (d) => String(d.label).includes(String(activeUserId)) ? 1 : 0.65)
+    .attr("opacity", (d) => String(d.caseId) === String(activeUserId) ? 1 : 0.65)
     .text((d) => d.label);
 
-  // Legend
-  const lx = iW - legends.length * 88 + 10;
-  const legendG = svgSel.selectAll(".case-legend").data([null]).join("g")
-    .attr("class", "case-legend").attr("transform", `translate(${m.left + lx},${m.top - 20})`);
-  legends.forEach((lbl, i) => {
-    legendG.selectAll(`.leg-${i}`).data([null]).join("rect")
-      .attr("class", `leg-${i}`)
-      .attr("x", i * 88).attr("y", 0).attr("width", 10).attr("height", 10)
-      .attr("rx", 3).attr("fill", colors[i]);
-    legendG.selectAll(`.leg-lbl-${i}`).data([null]).join("text")
-      .attr("class", `leg-lbl-${i} axis-label`)
-      .attr("x", i * 88 + 14).attr("y", 9).text(lbl);
-  });
+  function renderLegendRow(sectionG, labels, colors, width, yPos, legendKey) {
+    const itemsData = labels.map((label, index) => ({
+      label,
+      color: colors[index],
+      width: 30 + label.length * 6.6,
+    }));
+    const gap = 16;
+    const totalWidth = itemsData.reduce((sum, item) => sum + item.width, 0) + gap * Math.max(itemsData.length - 1, 0);
+    let cursor = Math.max(width - totalWidth, 180);
+    const legendData = itemsData.map((item) => {
+      const positioned = { ...item, x: cursor };
+      cursor += item.width + gap;
+      return positioned;
+    });
+
+    const legendItems = sectionG.selectAll(`.legend-item-${legendKey}`).data(legendData, (d) => d.label)
+      .join("g")
+      .attr("class", `legend-item legend-item-${legendKey}`)
+      .attr("transform", (d) => `translate(${d.x},${yPos})`);
+
+    legendItems.selectAll("rect").data((d) => [d]).join("rect")
+      .attr("width", 10)
+      .attr("height", 10)
+      .attr("rx", 3)
+      .attr("y", 0)
+      .attr("fill", (d) => d.color);
+
+    legendItems.selectAll("text").data((d) => [d]).join("text")
+      .attr("class", "axis-label")
+      .attr("x", 14)
+      .attr("y", 9)
+      .text((d) => d.label);
+  }
 }
 
 // ─── SVG helpers ─────────────────────────────────────────────────────────────
@@ -2030,10 +2273,18 @@ function formatCompact(n) {
   if (Math.abs(n) >= 1000)    return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
   return String(n);
 }
+function formatFullCount(n) {
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  return Number(n).toLocaleString("en-US");
+}
 function percent(v) {
   if (v === null || v === undefined) return "—%";
   return `${Math.round(v * 100)}%`;
 }
 function labelFromFilterId(id) {
-  return id === "same_country" ? "country" : id === "same_age_group" ? "age group" : id;
+  if (id === "same_country") return "country";
+  if (id === "same_age_group") return "age group";
+  if (id === "same_gender") return "gender";
+  if (id === "same_music_taste") return "music taste";
+  return id;
 }

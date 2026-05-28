@@ -150,7 +150,7 @@
         <p class="eyebrow">Last.fm UK Friendship Graph · COM-480</p>
         <h1>Who is one<br><em>meaningful step</em><br>away from you?</h1>
         <p class="lead">
-          Pick a user. Follow the bridges. Discover which second-degree connections are worth an introduction — and exactly why.
+          Pick a curated ego case. Follow the bridges. Inspect the shipped second-degree slice and see why those introductions rise to the top.
         </p>
         <div id="overview-strip" class="overview-strip"></div>
         <div class="hero-actions">
@@ -193,7 +193,7 @@
         <div class="explorer-copy">
           <p class="eyebrow">Interactive Explorer</p>
           <h2 id="stage-title">From one person to a reachable neighborhood</h2>
-          <p class="explorer-lead">Select a user, filter the second ring, and follow how bridges and candidates respond together.</p>
+          <p class="explorer-lead">Select a shipped ego case, filter the ranked candidate pool, and track how bridge friends and visible matches respond together.</p>
         </div>
         <div id="stage-metrics" class="stage-metrics"></div>
       </div>
@@ -227,6 +227,9 @@
               <strong id="topn-value">12</strong>
             </div>
           </label>
+
+          <div id="ranking-note" class="control-note"></div>
+          <button type="button" id="clear-focus-btn" class="btn-ghost control-reset">Clear focus</button>
         </article>
 
         <article class="context-card">
@@ -294,8 +297,8 @@
     <section id="atlas" class="panel atlas-header">
       <div class="atlas-copy">
         <p class="eyebrow">Data Atlas</p>
-        <h2>What the full graph says beyond the interactive cases</h2>
-        <p class="note-copy">The explorer focuses on exemplar ego users. This section zooms out: how large the second ring becomes, where shared-trait overlap appears, and how the selected case compares with the broader dataset.</p>
+        <h2>What the broader dataset says beyond the shipped cases</h2>
+        <p class="note-copy">The explorer is a curated, ranked slice of three ego cases. This section separates the global dataset patterns from the smaller candidate pools embedded in the interactive view.</p>
       </div>
       <div class="atlas-side">
         <div id="atlas-focus" class="atlas-focus"></div>
@@ -308,6 +311,7 @@
         <div class="section-head">
           <p class="eyebrow">Case Comparison</p>
           <h2>How the exemplar users differ</h2>
+          <p class="section-note">Total reach and shipped-pool overlap counts are split below so the chart does not compare different scales as if they were the same measure.</p>
         </div>
         <div id="chart-cases" class="chart"></div>
       </article>
@@ -347,9 +351,9 @@
       <article class="panel chart-panel">
         <div class="section-head">
           <p class="eyebrow">Audience</p>
-          <h2>Top countries</h2>
+          <h2>Country signal in this build</h2>
         </div>
-        <div id="chart-countries" class="chart"></div>
+        <div id="atlas-scope-note" class="atlas-note"></div>
       </article>
     </section>
 

@@ -3,7 +3,7 @@
 **COM-480 Data Visualization — EPFL**
 Ahmed Chaouachi (346447) · Shin Urech (327245) · Joyti Goel (325374)
 
-An interactive D3.js visualization that answers: *"Who is one meaningful mutual-friend step away from me — and why?"*
+An interactive D3.js visualization of curated second-degree introductions in the Last.fm UK friendship graph.
 
 Built on the [Last.fm UK User Graph dataset](https://zenodo.org/records/10694369) (75,969 users · 389,639 friendships).
 
@@ -11,7 +11,14 @@ Built on the [Last.fm UK User Graph dataset](https://zenodo.org/records/10694369
 
 ## View the site
 
-### Option 1 — Open locally (no server needed)
+### Option 1 — Local dev server (recommended)
+
+```bash
+python3 -m http.server 8000 --directory docs
+# Then open http://127.0.0.1:8000
+```
+
+### Option 2 — Open directly
 
 ```bash
 open docs/index.html        # macOS
@@ -21,15 +28,15 @@ xdg-open docs/index.html    # Linux
 
 Any modern browser works. No install step required.
 
-### Option 2 — Deploy with GitHub Pages
+### Option 3 — Deploy with GitHub Pages
 
 1. Go to your repo on GitHub → **Settings → Pages**
 2. Under *Build and deployment*:
    - Source: **Deploy from a branch**
-   - Branch: `main`
+   - Branch: `master`
    - Folder: `/docs`
 3. Save → wait ~60 seconds
-4. Your site is live at `https://<your-username>.github.io/milestone2/`
+4. Your site is live at `https://<your-username>.github.io/<repo-name>/`
 
 ### Option 3 — Local dev server
 
@@ -43,7 +50,7 @@ cd docs && python3 -m http.server 8080
 ## Project structure
 
 ```
-milestone2/
+TheSocialGraph/
 ├── docs/                  ← Live site (GitHub Pages deploys from here)
 │   ├── index.html
 │   ├── styles.css
@@ -88,10 +95,12 @@ milestone2/
 | Filter by shared country / age group / gender (AND/OR) | Live |
 | Candidate ranking by score + mutual friends | Live |
 | Bridge friend spotlight with path glow | Live |
-| 6 animated D3 atlas charts | Live |
+| 5 animated D3 atlas charts + quality summary | Live |
 | Story Mode: guided A → B → C overlay walkthrough | Live |
 | Find a Match wizard: persona selector + live mini force graph + multi-path fan reveal | Live |
 | Music-taste filter | Planned (needs user listening data) |
+
+The live explorer intentionally ships three curated ego cases with ranked candidate slices. It reports each ego's full second-degree reach, but it is not a full arbitrary-user neighborhood browser.
 
 ---
 

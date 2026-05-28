@@ -137,12 +137,14 @@ The initial website is running with the full skeleton of the visualization.
 All MVP pieces listed above are functional.
 
 The site lives in docs/ at the repository root.
-To view it locally, open docs/index.html in any modern browser — no server
-needed.
+To view it locally, run a simple static server from the repo root:
+  python3 -m http.server 8000 --directory docs
+Then open:
+  http://127.0.0.1:8000/
 
 To deploy via GitHub Pages:
-  Settings → Pages → Branch: main, Folder: /docs
-  The public URL will be: https://ahmedgoatchaouachi.github.io/milestone2/
+  Settings → Pages → Branch: master, Folder: /docs
+  The public URL will be: https://shinurech.github.io/TheSocialGraph/
 
 WHAT IS IMPLEMENTED
 -------------------
@@ -150,13 +152,14 @@ WHAT IS IMPLEMENTED
   - Bridge list panel (top 8 bridge friends by bridge count)
   - Candidate list panel (ranked by score, top-N slider)
   - Candidate detail panel (bridge path explanation, shared traits)
-  - Attribute filters: same country, same age group (live)
+  - Attribute filters: same country, same age group, same gender (live)
   - Planned filter slot: music taste (disabled, labeled as planned)
   - AND/OR filter mode toggle
-  - Stage metrics strip (direct count, two-hop pool, visible count, active focus)
+  - Stage metrics strip (direct count, total second-degree reach, shipped pool,
+    visible after filters, bridge focus)
   - Storyline cards (A/B/C narrative)
   - Hero overview strip (dataset stats)
-  - Atlas section with six charts
+  - Atlas section with five D3 charts plus a quality summary
   - Responsive layout (down to 780px)
   - Smooth hover transitions and graph interaction states
 
@@ -166,10 +169,9 @@ WHAT IS NOT YET IMPLEMENTED (honest scope boundary)
     is not present in the local workspace. The ArtistTags and ArtistsMap
     files contain artist metadata but no per-user listening records.
     This is documented in the prototype as a planned next step.
-  - D3 force-directed animation: the current graph uses a static ring
-    layout. D3 force simulation with animated transitions is the next
-    planned upgrade (stretch goal B above).
-  - Screencast, process book, final README: these are Milestone 3 items.
+  - Full arbitrary-user browsing beyond the curated shipped cases. The live
+    explorer currently ships 3 curated exemplar egos with a ranked slice of
+    16 candidates per case, while still reporting full second-degree reach.
 
 DATA NOTES
 ----------
@@ -177,7 +179,8 @@ DATA NOTES
   - 75,969 connected users, 389,639 unique undirected friendships
   - Median direct-friend degree: 5
   - Median second-degree reach: 166 (33× expansion in one hop)
-  - 5 exemplar ego users selected for diverse, readable scenarios
+  - 3 curated exemplar ego users are shipped in the current live bundle
+  - Each shipped case includes a ranked pool of 16 candidate introductions
   - ArtistTags (246 MB) is excluded from git — too large for GitHub.
     It is available in the local workspace for future music-taste work.
 
